@@ -19,6 +19,7 @@
 *.swp
 .dirstamp
 /bin
+/lib
 m4
 /autom4te.cache
 Makefile
@@ -90,3 +91,6 @@ Pipfile.lock
 
 # project local vim settings
 .vim/
+
+# EPICS
+O.*/
