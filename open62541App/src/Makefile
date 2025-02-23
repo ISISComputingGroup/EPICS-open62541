@@ -55,10 +55,10 @@ ifdef T_A
 install:
 	$(CMAKE) $(TOP) -G "$(CMAKE_GENERATOR)" -A "$(PLATFORM)" $(CMAKE_CONFIG_FLAGS)
 	$(CMAKE) --build . --target install --config $(CMAKE_CONFIG) $(CMAKE_BUILD_FLAGS)
-	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/bin $(TOP)/bin/$(EPICS_HOST_ARCH)
 ifneq ($(findstring linux-x86_64,$(EPICS_HOST_ARCH)),)
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib64 $(TOP)/lib/$(EPICS_HOST_ARCH)
 else
+	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/bin $(TOP)/bin/$(EPICS_HOST_ARCH)
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib $(TOP)/lib/$(EPICS_HOST_ARCH)
 endif
 # we cannot do this as include already exists as part of source tree
