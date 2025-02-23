@@ -55,32 +55,13 @@ ifdef T_A
 install:
 	$(CMAKE) $(TOP) -G "$(CMAKE_GENERATOR)" -A "$(PLATFORM)" $(CMAKE_CONFIG_FLAGS)
 	$(CMAKE) --build . --target install --config $(CMAKE_CONFIG) $(CMAKE_BUILD_FLAGS)
-	-$(MKDIR) $(TOP)/bin
-	-$(MKDIR) $(TOP)/bin/$(EPICS_HOST_ARCH)
-	-$(MKDIR) $(TOP)/lib
-	-$(MKDIR) $(TOP)/lib/$(EPICS_HOST_ARCH)
-ifeq ($(findstring linux,$(EPICS_HOST_ARCH)),)
-	$(CP) -f $(MYINSTALLDIR)/bin/*.dll $(TOP)/bin/$(EPICS_HOST_ARCH)/
-	$(CP) -f $(MYINSTALLDIR)/lib/*.lib $(TOP)/lib/$(EPICS_HOST_ARCH)/
+	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/bin $(TOP)/bin/$(EPICS_HOST_ARCH)
+ifneq ($(findstring linux-x86_64,$(EPICS_HOST_ARCH)),)
+	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib64 $(TOP)/lib/$(EPICS_HOST_ARCH)
+else
+	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib $(TOP)/lib/$(EPICS_HOST_ARCH)
 endif
-#ifeq ($(findstring linux,$(EPICS_HOST_ARCH)),)
-#ifeq ($(findstring linux,$(EPICS_HOST_ARCH)),)
-#	$(CP) -f $(MYSQLCONN_DIR)/bin/* $(TOP)/bin/$(EPICS_HOST_ARCH)/
-# dlls and pdbs need to be in bin not lib (and leaving copy in lib causes link errors)
-#	$(CP) -f $(MYSQLCONN_DIR)/lib64/$(INSTSUBDIR)/* $(TOP)/lib/$(EPICS_HOST_ARCH)/
-#	$(CP) -f $(MYSQLCONN_DIR)/lib64/vs14/$(INSTSUBDIR)/mysqlcppconn$(MYSQLLIBSFX).lib $(TOP)/lib/$(EPICS_HOST_ARCH)/mysqlcppconn.lib
-#	$(CP) -f $(MYSQLCONN_DIR)/lib64/vs14/$(INSTSUBDIR)/mysqlcppconn8$(MYSQLLIBSFX).lib $(TOP)/lib/$(EPICS_HOST_ARCH)/mysqlcppconn8.lib
-#	$(CP) -f $(MYSQLCONN_DIR)/lib64/$(INSTSUBDIR)/*.dll $(TOP)/bin/$(EPICS_HOST_ARCH)/
-#	$(CP) -f $(MYSQLCONN_DIR)/lib64/$(INSTSUBDIR)/*.pdb $(TOP)/bin/$(EPICS_HOST_ARCH)/
-#else
-#	find $(MYSQLCONN_DIR)/lib* \( -type f -o -type l \) -exec $(CP) {} $(TOP)/lib/$(EPICS_HOST_ARCH)/ \;
-#	find $(MYSQLCONN_DIR)/lib* -name libmysqlcppconn-static.a -exec $(CP) {} $(TOP)/lib/$(EPICS_HOST_ARCH)/libmysqlcppconn.a \;
-#	find $(MYSQLCONN_DIR)/lib* -name libmysqlcppconn8-static.a -exec $(CP) {} $(TOP)/lib/$(EPICS_HOST_ARCH)/libmysqlcppconn8.a \;
-#	$(CP) -f $(MYSQL_INSTALL_DIR)/lib64/mysql/libmysqlclient.so  $(TOP)/lib/$(EPICS_HOST_ARCH)/
-#endif
-#endif
-#	-$(MKDIR) $(TOP)/include
-#	-$(MKDIR) $(TOP)/include/cppconn
-#	$(CP) -f $(MYSQLCONN_DIR)/include/jdbc/*.h $(TOP)/include/
-#	$(CP) -f $(MYSQLCONN_DIR)/include/jdbc/cppconn/*.h $(TOP)/include/cppconn/
+# we cannot do this as include already exists as part of source tree
+# so EPICS OPCUA will need to use $(MYINSTALLDIR)/include 
+#	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/include $(TOP)/include
 endif
