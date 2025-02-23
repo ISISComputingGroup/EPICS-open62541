@@ -26,6 +26,10 @@ endif
 
 CMAKE_CONFIG_FLAGS += -DUA_ENABLE_ENCRYPTION=OPENSSL -DOPENSSL_ROOT_DIR=$(OPENSSL)/install/$(EPICS_HOST_ARCH)
 
+#CMAKE_CONFIG_FLAGS += -DUA_BUILD_EXAMPLES=ON
+#CMAKE_CONFIG_FLAGS += -DUA_BUILD_TOOLS=ON
+#CMAKE_CONFIG_FLAGS += -DUA_BUILD_UNIT_TESTS=ON
+
 CMAKE_BUILD_FLAGS=
 ifneq ($(findstring linux,$(EPICS_HOST_ARCH)),)
 CMAKE_GENERATOR=Unix Makefiles
@@ -58,7 +62,9 @@ install:
 ifneq ($(findstring linux-x86_64,$(EPICS_HOST_ARCH)),)
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib64 $(TOP)/lib/$(EPICS_HOST_ARCH)
 else
+ifeq ($(findstring static,$(EPICS_HOST_ARCH)),)
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/bin $(TOP)/bin/$(EPICS_HOST_ARCH)
+endif
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib $(TOP)/lib/$(EPICS_HOST_ARCH)
 endif
 # we cannot do this as include already exists as part of source tree
