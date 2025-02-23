@@ -810,8 +810,11 @@ if(MSVC)
   endif()
 
   if(UA_MSVC_FORCE_STATIC_CRT AND NOT BUILD_SHARED_LIBS)
-    set(CompilerFlags CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE CMAKE_C_FLAGS
-        CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE)
+    set(CompilerFlags CMAKE_CXX_FLAGS CMAKE_C_FLAGS)
+    foreach(Conf ${CMAKE_CONFIGURATION_TYPES})
+        string(TOUPPER ${Conf} ConfUC)
+        list(APPEND CompilerFlags "CMAKE_CXX_FLAGS_${ConfUC}" "CMAKE_C_FLAGS_${ConfUC}")
+    endforeach()
     foreach(CompilerFlag ${CompilerFlags})
       string(REPLACE "/MD" "/MT" ${CompilerFlag} "${${CompilerFlag}}")
     endforeach()
