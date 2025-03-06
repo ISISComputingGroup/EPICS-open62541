@@ -46,6 +46,9 @@ else
 CMAKE_CONFIG=RelWithDebInfo
 endif
 CMAKE_CONFIG_FLAGS += -DCMAKE_BUILD_TYPE:STRING=$(CMAKE_CONFIG)
+CMAKE_CONFIG_FLAGS += -DUA_BUILD_TOOLS:BOOL=ON
+CMAKE_CONFIG_FLAGS += -DUA_BUILD_EXAMPLES:BOOL=ON
+#CMAKE_CONFIG_FLAGS += -DUA_NAMESPACE_ZERO:STRING=FULL
 
 include $(TOP)/configure/RULES
 #----------------------------------------
@@ -60,6 +63,8 @@ ifneq ($(findstring linux-x86_64,$(EPICS_HOST_ARCH)),)
 else
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/bin $(TOP)/bin/$(EPICS_HOST_ARCH)
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib $(TOP)/lib/$(EPICS_HOST_ARCH)
+	$(CP) bin/$(CMAKE_CONFIG)/ua.exe $(TOP)/bin/$(EPICS_HOST_ARCH)
+	$(CP) bin/examples/client.exe $(TOP)/bin/$(EPICS_HOST_ARCH)
 endif
 # we cannot do this as include already exists as part of source tree
 # so EPICS OPCUA will need to use $(MYINSTALLDIR)/include 
