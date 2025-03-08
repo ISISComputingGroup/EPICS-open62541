@@ -646,6 +646,18 @@ if(MINGW)
     list(APPEND open62541_LIBRARIES ssp)
 endif()
 
+if(WIN32)
+    if(BUILD_TYPE_LOWER_CASE STREQUAL "debug")
+        list(APPEND open62541_LIBRARIES zlibd)
+    else()
+        list(APPEND open62541_LIBRARIES zlib)
+    endif()
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /LIBPATH:\"$ENV{ZLIB}/lib/$ENV{EPICS_HOST_ARCH}\"")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} /LIBPATH:\"$ENV{ZLIB}/lib/$ENV{EPICS_HOST_ARCH}\"")
+else()
+    list(APPEND open62541_LIBRARIES z)
+endif()
+
 #####################
 # Compiler Settings #
 #####################

@@ -54,6 +54,9 @@ CMAKE_CONFIG_FLAGS += -DUA_BUILD_TOOLS:BOOL=ON
 CMAKE_CONFIG_FLAGS += -DUA_BUILD_EXAMPLES:BOOL=ON
 #CMAKE_CONFIG_FLAGS += -DUA_NAMESPACE_ZERO:STRING=FULL
 
+# ZLIB defined in configure/RELEASE and used in CMakeLists.txt
+export ZLIB
+
 include $(TOP)/configure/RULES
 #----------------------------------------
 #  ADD RULES AFTER THIS LINE
