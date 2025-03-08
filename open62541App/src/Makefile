@@ -73,7 +73,6 @@ ifeq ($(findstring static,$(EPICS_HOST_ARCH)),)
 endif
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib $(TOP)/lib/$(EPICS_HOST_ARCH)
 	$(CP) bin/$(CMAKE_CONFIG)/ua.exe $(TOP)/bin/$(EPICS_HOST_ARCH)
-	$(CP) bin/examples/client.exe $(TOP)/bin/$(EPICS_HOST_ARCH)
 endif
 # we cannot do this as include already exists as part of source tree
 # so EPICS OPCUA will need to use $(MYINSTALLDIR)/include 
