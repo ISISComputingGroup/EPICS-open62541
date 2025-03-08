@@ -28,6 +28,6 @@ iocBoot_DEPEND_DIRS += $(filter %App,$(DIRS))
 
 # Add any additional dependency rules here:
 
-UNINSTALL_DIRS = $(TOP)/bin $(TOP)/lib $(TOP)/install
-
 include $(TOP)/configure/RULES_TOP
+
+UNINSTALL_DIRS = $(TOP)/install
