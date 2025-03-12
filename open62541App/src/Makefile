@@ -54,6 +54,10 @@ CMAKE_CONFIG_FLAGS += -DUA_BUILD_TOOLS:BOOL=ON
 CMAKE_CONFIG_FLAGS += -DUA_BUILD_EXAMPLES:BOOL=ON
 #CMAKE_CONFIG_FLAGS += -DUA_NAMESPACE_ZERO:STRING=FULL
 
+ifeq ($(findstring static,$(EPICS_HOST_ARCH)),)
+BIN_INSTALLS_WIN32 += $(wildcard $(OPENSSL)/bin/$(EPICS_HOST_ARCH)/*.dll)
+endif
+
 # ZLIB defined in configure/RELEASE and used in CMakeLists.txt
 export ZLIB
 
@@ -69,6 +73,7 @@ ifneq ($(findstring linux-x86_64,$(EPICS_HOST_ARCH)),)
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/lib64 $(TOP)/lib/$(EPICS_HOST_ARCH)
 else
 	$(CP) bin/$(CMAKE_CONFIG)/ua.exe $(MYINSTALLDIR)/bin
+	$(CP) bin/examples/*.exe $(MYINSTALLDIR)/bin
 ifeq ($(findstring static,$(EPICS_HOST_ARCH)),)
 	$(CMAKE) -E copy_directory $(MYINSTALLDIR)/bin $(TOP)/bin/$(EPICS_HOST_ARCH)
 endif
