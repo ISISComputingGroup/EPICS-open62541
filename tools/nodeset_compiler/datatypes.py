@@ -37,7 +37,7 @@ if sys.version_info[0] >= 3:
 
     string_types = str
 else:
-    string_types = basestring 
+    string_types = basestring
 
 def getNextElementNode(xmlvalue):
     if xmlvalue is None:
@@ -246,18 +246,23 @@ class Value(object):
                 # The EncodingMask must be skipped.
                 if ebodypart.localName == "EncodingMask":
                     ebodypart = getNextElementNode(ebodypart)
+                    # No optional fields are set.
+                    if(ebodypart is None):
+                        members = []
 
-                # The SwitchField must be checked.
-                if ebodypart.localName == "SwitchField":
-                    # The switch field is the index of the available union fields starting with 1
-                    data = int(ebodypart.firstChild.data)
-                    if data == 0:
-                        # If the switch field is 0 then no field is present. A Union with no fields present has the same meaning as a NULL value.
-                        members = []
-                    else:
-                        members = []
-                        members.append(enc.members[data-1])
-                        ebodypart = getNextElementNode(ebodypart)
+                # The SwitchField must be checked. ebodypart could be None if only optional fields are included
+                # in the ExtensionObject and none of them is set.
+                if(ebodypart is not None):
+                    if ebodypart.localName == "SwitchField":
+                        # The switch field is the index of the available union fields starting with 1
+                        data = int(ebodypart.firstChild.data)
+                        if data == 0:
+                            # If the switch field is 0 then no field is present. A Union with no fields present has the same meaning as a NULL value.
+                            members = []
+                        else:
+                            members = []
+                            members.append(enc.members[data-1])
+                            ebodypart = getNextElementNode(ebodypart)
 
 
                 for e in members:
@@ -284,8 +289,9 @@ class Value(object):
                                 extobj.value.append(values)
                             else:
                                 t = self.getTypeByString(e.member_type.name, None)
-                                t.alias = ebodypart.localName
-                                t.parseXML(ebodypart)
+                                if t is not None:   # cannot get Type for 'Variant' now
+                                    t.alias = ebodypart.localName
+                                    t.parseXML(ebodypart)
                                 extobj.value.append(t)
                         elif isinstance(e.member_type, StructType):
                             # information is_array!
@@ -344,7 +350,7 @@ class Value(object):
                 else:
                     logger.error(str(parent.id) + ": Could not parse <SwitchFiled> for Union.")
                     return self
-                
+
 
             childValue = ebodypart.firstChild
             if not childValue.nodeType == ebodypart.ELEMENT_NODE:
@@ -498,13 +504,17 @@ class Int32(Integer):
         # Extract <value> from string if possible
         if isinstance(self.value, string_types) and not self.__strIsInt(self.value):
             split = self.value.split('_')
-            if len(split) == 2 and self.__strIsInt(split[1]):
-                self.value = split[1]
+            if self.__strIsInt(split[len(split)-1]):
+                self.value = split[len(split)-1]
 
     @staticmethod
     def __strIsInt(strValue):
+        # 0_0 is not a valid number, but does not throw an error when converted to an integer.
+        # Therefore, this case must be checked separately.
         try:
             int(strValue)
+            if strValue[0:2] == '0_':
+                return False
             return True
         except:
             return False
@@ -531,7 +541,7 @@ class Float(Number):
     def __init__(self, xmlelement=None):
         Number.__init__(self)
         if xmlelement:
-            Float.parseXML(self, xmlelement)
+            self.parseXML(xmlelement)
 
     def parseXML(self, xmlvalue):
         # Expect <Float>value</Float> or
@@ -624,16 +634,28 @@ class LocalizedText(Value):
         #          <Locale>xx_XX</Locale>
         #          <Text>TextText</Text>
         #        <LocalizedText> or </AliasName>
+        # OR <LocalizedText Locale="en">Text</LocalizedText>
+
         if not isinstance(xmlvalue, dom.Element):
             self.text = xmlvalue
             return
         self.checkXML(xmlvalue)
-        tmp = xmlvalue.getElementsByTagName("Locale")
-        if len(tmp) > 0 and tmp[0].firstChild != None:
-            self.locale = tmp[0].firstChild.data.strip(' \t\n\r')
+        tmp = xmlvalue.getAttribute("Locale")
+        if tmp != "":
+            self.locale = tmp
+        else:
+            tmp = xmlvalue.getElementsByTagName("Locale")
+            if len(tmp) > 0 and tmp[0].firstChild != None:
+                self.locale = tmp[0].firstChild.data.strip(' \t\n\r')
+
         tmp = xmlvalue.getElementsByTagName("Text")
         if len(tmp) > 0 and tmp[0].firstChild != None:
             self.text = tmp[0].firstChild.data.strip(' \t\n\r')
+        else:
+            tmp = xmlvalue.firstChild
+            if tmp and tmp.nodeType == dom.Element.TEXT_NODE:
+                self.text = tmp.data.strip(' \t\n\r')
+
 
     def __str__(self):
         if self.locale is None and self.text is None:
@@ -675,7 +697,7 @@ class NodeId(Value):
                     self.ns = namespaceMapping[self.ns]
             elif p[:2] == "i=":
                 self.i = int(p[2:])
-            elif p[:2] == "o=":
+            elif p[:2] == "b=":
                 self.b = p[2:]
             elif p[:2] == "g=":
                 tmp = []
@@ -688,6 +710,9 @@ class NodeId(Value):
                 self.s = p[2:]
             else:
                 raise Exception("no valid nodeid: " + idstring)
+
+    def gAsString(self):
+        return '{:08X}-{:04X}-{:04X}-{:04X}-{:012X}'.format(*self.g);
 
     # The parsing can be called with an optional namespace mapping dict.
     def parseXML(self, xmlvalue):
@@ -851,8 +876,11 @@ class Guid(Value):
         # <Guid>
         #   <String>01234567-89AB-CDEF-ABCD-0123456789AB</String>
         # </Guid>
+        val = None  # set to None before check
         if len(xmlvalue.getElementsByTagName("String")) != 0:
             val = getXmlTextTrimmed(xmlvalue.getElementsByTagName("String")[0].firstChild)
+        else:
+            val = getXmlTextTrimmed(xmlvalue.firstChild)    # no 'String' like 'DataSetFieldId'
 
         if val is None:
             self.value = ['00000000', '0000', '0000', '0000', '000000000000']  # Catch XML <Guid /> by setting the value to a default

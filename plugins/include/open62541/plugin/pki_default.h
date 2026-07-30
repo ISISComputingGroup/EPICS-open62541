@@ -12,14 +12,20 @@
 
 _UA_BEGIN_DECLS
 
-/* Default implementation that accepts all certificates */
+/* Default implementation that accepts all certificates
+ * Any plugin implementation should invalidate an existing certificate verification
+ * by first calling the internal clear() method if it is not NULL.
+ * Refer to the default implementation in src/plugins/crypto/ua_pki_none.c */
 UA_EXPORT void
 UA_CertificateVerification_AcceptAll(UA_CertificateVerification *cv);
 
 #ifdef UA_ENABLE_ENCRYPTION
 
-/* Accept certificates based on a trust-list and a revocation-list. Based on
- * mbedTLS. */
+/* Accept certificates based on a trust-list and a revocation-list. Based on mbedTLS.
+ * Any plugin implementation should invalidate an existing certificate verification
+ * by first calling the internal clear() method if it is not NULL.
+ * Refer to the default implementation in src/plugins/crypto/mbedtls/ua_pki_mbedtls.c
+ * or src/plugins/crypto/openssl/ua_pki_openssl.c */
 UA_EXPORT UA_StatusCode
 UA_CertificateVerification_Trustlist(UA_CertificateVerification *cv,
                                      const UA_ByteString *certificateTrustList,
@@ -30,11 +36,21 @@ UA_CertificateVerification_Trustlist(UA_CertificateVerification *cv,
                                      size_t certificateRevocationListSize);
 
 #ifdef __linux__ /* Linux only so far */
+
+#ifdef UA_ENABLE_CERT_REJECTED_DIR
+UA_EXPORT UA_StatusCode
+UA_CertificateVerification_CertFolders(UA_CertificateVerification *cv,
+                                       const char *trustListFolder,
+                                       const char *issuerListFolder,
+                                       const char *revocationListFolder,
+                                       const char *rejectedListFolder);
+#else
 UA_EXPORT UA_StatusCode
 UA_CertificateVerification_CertFolders(UA_CertificateVerification *cv,
                                        const char *trustListFolder,
                                        const char *issuerListFolder,
                                        const char *revocationListFolder);
+#endif
 #endif
 
 #endif
