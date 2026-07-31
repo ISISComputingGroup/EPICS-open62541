@@ -482,12 +482,19 @@ Operation_TransferSubscription(UA_Server *server, UA_Session *session,
     }
 
     /* Check with AccessControl if the transfer is allowed */
-    if(!server->config.accessControl.allowTransferSubscription ||
-       !server->config.accessControl.
-       allowTransferSubscription(server, &server->config.accessControl,
-                                 oldSession ? &oldSession->sessionId : NULL,
-                                 oldSession ? oldSession->sessionHandle : NULL,
-                                 &session->sessionId, session->sessionHandle)) {
+    UA_Boolean transferAllowed =
+        (server->config.accessControl.allowTransferSubscription != NULL);
+    if(transferAllowed) {
+        UA_UNLOCK(&server->serviceMutex);
+        transferAllowed = server->config.accessControl.
+            allowTransferSubscription(server, &server->config.accessControl,
+                                      oldSession ? &oldSession->sessionId : NULL,
+                                      oldSession ? oldSession->sessionHandle : NULL,
+                                      &session->sessionId, session->sessionHandle);
+        UA_LOCK(&server->serviceMutex);
+    }
+
+    if(!transferAllowed) {
         result->statusCode = UA_STATUSCODE_BADUSERACCESSDENIED;
         return;
     }
@@ -541,6 +548,15 @@ Operation_TransferSubscription(UA_Server *server, UA_Session *session,
         LIST_INSERT_HEAD(&newSub->monitoredItems, mon, listEntry);
     }
     sub->monitoredItemsSize = 0;
+
+    /* Move over the samplingMonitoredItems and adjust the backpointers */
+    LIST_INIT(&newSub->samplingMonitoredItems);
+    UA_MonitoredItem *smon, *smon_tmp;
+    LIST_FOREACH_SAFE(smon, &sub->samplingMonitoredItems, sampling.samplingListEntry, smon_tmp) {
+        LIST_REMOVE(smon, sampling.samplingListEntry);
+        LIST_INSERT_HEAD(&newSub->samplingMonitoredItems, smon,
+                         sampling.samplingListEntry);
+    }
 
     /* Move over the notification queue */
     TAILQ_INIT(&newSub->notificationQueue);

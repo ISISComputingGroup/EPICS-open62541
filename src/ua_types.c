@@ -636,8 +636,11 @@ checkAdjustRange(const UA_Variant *v, UA_NumericRange *range) {
     /* Check that the number of elements in the variant matches the array
      * dimensions */
     size_t elements = 1;
-    for(size_t i = 0; i < dims_count; ++i)
+    for(size_t i = 0; i < dims_count; ++i) {
+        if(dims[i] != 0 && elements > SIZE_MAX / dims[i])
+            return UA_STATUSCODE_BADINTERNALERROR;
         elements *= dims[i];
+    }
     if(elements != v->arrayLength)
         return UA_STATUSCODE_BADINTERNALERROR;
 
@@ -700,6 +703,11 @@ computeStrides(const UA_Variant *v, const UA_NumericRange range,
             *block = running_dimssize * dimrange;
             *stride = running_dimssize * dims[k];
         }
+        /* Overflow in running_dimssize is only possible when the Variant has
+         * passed a corrupted state through checkAdjustRange. Guard here as a
+         * defence-in-depth measure. */
+        if(running_dimssize != 0 && dims[k] > SIZE_MAX / running_dimssize)
+            break;
         *first += running_dimssize * range.dimensions[k].min;
         running_dimssize *= dims[k];
     }
@@ -931,7 +939,7 @@ Variant_setRange(UA_Variant *v, void *array, size_t arraySize,
 
     /* If members were moved, initialize original array to prevent reuse */
     if(!copy && !v->type->pointerFree)
-        memset(array, 0, sizeof(elem_size)*arraySize);
+        memset(array, 0, elem_size*arraySize);
 
     return retval;
 }
@@ -1436,7 +1444,7 @@ extensionObjectOrder(const UA_ExtensionObject *p1, const UA_ExtensionObject *p2,
     case UA_EXTENSIONOBJECT_DECODED:
     default: {
             const UA_DataType *type1 = p1->content.decoded.type;
-            const UA_DataType *type2 = p1->content.decoded.type;
+            const UA_DataType *type2 = p2->content.decoded.type;
             if(type1 != type2)
                 return ((uintptr_t)type1 < (uintptr_t)type2) ? UA_ORDER_LESS : UA_ORDER_MORE;
             if(!type1)
@@ -1752,7 +1760,9 @@ UA_Array_copy(const void *src, size_t size,
         return UA_STATUSCODE_GOOD;
     }
 
-    if(!type)
+    /* Check the array consistency -- defensive programming in case the user
+     * manually created an inconsistent array */
+    if(UA_UNLIKELY(!type || !src))
         return UA_STATUSCODE_BADINTERNALERROR;
 
     /* calloc, so we don't have to check retval in every iteration of copying */
@@ -1848,7 +1858,7 @@ UA_Array_append(void **p, size_t *size, void *newElem,
     return UA_STATUSCODE_GOOD;
 }
 
-UA_StatusCode UA_EXPORT
+UA_StatusCode
 UA_Array_appendCopy(void **p, size_t *size, const void *newElem,
                     const UA_DataType *type) {
     char scratch[512];
