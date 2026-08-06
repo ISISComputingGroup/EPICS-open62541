@@ -1,6 +1,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/. 
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
  *    Copyright 2020 (c) Fraunhofer IOSB (Author: Andreas Ebner)
  *    Copyright 2020 (c) Grigory Friedman
@@ -281,16 +281,14 @@ DECODE_BINARY(UInt64) {
 /************************/
 
 /* Can we reuse the integer encoding mechanism by casting floating point
- * values? */
-#if (UA_FLOAT_IEEE754 == 1) && (UA_LITTLE_ENDIAN == UA_FLOAT_LITTLE_ENDIAN)
-# define Float_encodeBinary UInt32_encodeBinary
-# define Float_decodeBinary UInt32_decodeBinary
-# define Double_encodeBinary UInt64_encodeBinary
-# define Double_decodeBinary UInt64_decodeBinary
-#else
+ * values? For single float values we ensure that only quiet NAN are used.
+ * For float arrays we want to have the speed advantage of just memcpy (if
+ * the processor architecture uses IEE754). We get array-memcpy by the
+ * "overlayable" bit in the datatype description. */
 
+#if (UA_FLOAT_IEEE754 < 1) || (UA_LITTLE_ENDIAN != UA_FLOAT_LITTLE_ENDIAN)
 #include <math.h>
-
+#define UA_SLOW_IEEE754 1
 #pragma message "No native IEEE 754 format detected. Use slow generic encoding."
 
 /* Handling of IEEE754 floating point values was taken from Beej's Guide to
@@ -326,6 +324,8 @@ unpack754(uint64_t i, unsigned bits, unsigned expbits) {
     return result;
 }
 
+#endif
+
 /* Float */
 #define FLOAT_NAN 0xffc00000
 #define FLOAT_INF 0x7f800000
@@ -335,19 +335,26 @@ unpack754(uint64_t i, unsigned bits, unsigned expbits) {
 ENCODE_BINARY(Float) {
     UA_Float f = *src;
     u32 encoded;
-    /* cppcheck-suppress duplicateExpression */
-    if(f != f) encoded = FLOAT_NAN;
+    if(UA_UNLIKELY(f != f)) encoded = FLOAT_NAN; /* quit NAN */
+#ifndef UA_SLOW_IEEE754
+    else memcpy(&encoded, &f, sizeof(UA_Float));
+#else
     else if(f == 0.0f) encoded = signbit(f) ? FLOAT_NEG_ZERO : 0;
     else if(f/f != f/f) encoded = f > 0 ? FLOAT_INF : FLOAT_NEG_INF;
     else encoded = (u32)pack754(f, 32, 8);
+#endif
     return ENCODE_DIRECT(&encoded, UInt32);
 }
 
 DECODE_BINARY(Float) {
     u32 decoded;
     status ret = DECODE_DIRECT(&decoded, UInt32);
-    if(ret != UA_STATUSCODE_GOOD)
-        return ret;
+    UA_CHECK_STATUS(ret, return ret);
+#ifndef UA_SLOW_IEEE754
+    if(UA_UNLIKELY((decoded >= 0x7f800001 && decoded <= 0x7fffffff) ||
+                   (decoded >= 0xff800001))) decoded = FLOAT_NAN;
+    memcpy(dst, &decoded, sizeof(UA_Float));
+#else
     if(decoded == 0) *dst = 0.0f;
     else if(decoded == FLOAT_NEG_ZERO) *dst = -0.0f;
     else if(decoded == FLOAT_INF) *dst = INFINITY;
@@ -355,6 +362,7 @@ DECODE_BINARY(Float) {
     else if((decoded >= 0x7f800001 && decoded <= 0x7fffffff) ||
        (decoded >= 0xff800001)) *dst = NAN;
     else *dst = (UA_Float)unpack754(decoded, 32, 8);
+#endif
     return UA_STATUSCODE_GOOD;
 }
 
@@ -368,10 +376,14 @@ ENCODE_BINARY(Double) {
     UA_Double d = *src;
     u64 encoded;
     /* cppcheck-suppress duplicateExpression */
-    if(d != d) encoded = DOUBLE_NAN;
+    if(UA_UNLIKELY(d != d)) encoded = DOUBLE_NAN; /* quiet NAN*/
+#ifndef UA_SLOW_IEEE754
+    else memcpy(&encoded, &d, sizeof(UA_Double));
+#else
     else if(d == 0.0) encoded = signbit(d) ? DOUBLE_NEG_ZERO : 0;
     else if(d/d != d/d) encoded = d > 0 ? DOUBLE_INF : DOUBLE_NEG_INF;
     else encoded = pack754(d, 64, 11);
+ #endif
     return ENCODE_DIRECT(&encoded, UInt64);
 }
 
@@ -379,6 +391,11 @@ DECODE_BINARY(Double) {
     u64 decoded;
     status ret = DECODE_DIRECT(&decoded, UInt64);
     UA_CHECK_STATUS(ret, return ret);
+#ifndef UA_SLOW_IEEE754
+    if(UA_UNLIKELY((decoded >= 0x7ff0000000000001L && decoded <= 0x7fffffffffffffffL) ||
+                   (decoded >= 0xfff0000000000001L))) decoded = DOUBLE_NAN;
+    memcpy(dst, &decoded, sizeof(UA_Double));
+#else
     if(decoded == 0) *dst = 0.0;
     else if(decoded == DOUBLE_NEG_ZERO) *dst = -0.0;
     else if(decoded == DOUBLE_INF) *dst = INFINITY;
@@ -386,10 +403,9 @@ DECODE_BINARY(Double) {
     else if((decoded >= 0x7ff0000000000001L && decoded <= 0x7fffffffffffffffL) ||
        (decoded >= 0xfff0000000000001L)) *dst = NAN;
     else *dst = (UA_Double)unpack754(decoded, 64, 11);
+#endif
     return UA_STATUSCODE_GOOD;
 }
-
-#endif
 
 /******************/
 /* Array Handling */
@@ -436,7 +452,7 @@ Array_encodeBinary(const void *src, size_t length, const UA_DataType *type, Ctx 
         return UA_STATUSCODE_BADINTERNALERROR;
     if(length > 0)
         signed_length = (i32)length;
-    else if(src == UA_EMPTY_ARRAY_SENTINEL)
+    else if(src >= UA_EMPTY_ARRAY_SENTINEL) /* src != NULL */
         signed_length = 0;
 
     /* Encode the array length */
@@ -481,7 +497,8 @@ Array_decodeBinary(void *UA_RESTRICT *UA_RESTRICT dst, size_t *out_length,
      * sizeof(UA_DataValue) == 80 and an empty DataValue is encoded with just
      * one byte. We use 128 as the smallest power of 2 larger than 80. */
     size_t length = (size_t)signed_length;
-    UA_CHECK(ctx->pos + ((type->memSize * length) / 128) <= ctx->end,
+    size_t remaining = (size_t)(ctx->end - ctx->pos);
+    UA_CHECK(length / 128 <= remaining / type->memSize,
              return UA_STATUSCODE_BADDECODINGERROR);
 
     /* Allocate memory */
@@ -933,8 +950,10 @@ Variant_encodeBinaryWrapExtensionObject(const UA_Variant *src,
     if(isArray) {
         UA_CHECK(src->arrayLength <= UA_INT32_MAX, return UA_STATUSCODE_BADENCODINGERROR);
         length = src->arrayLength;
+
         i32 encodedLength = (i32)src->arrayLength;
-        ret = ENCODE_DIRECT(&encodedLength, UInt32); /* Int32 */
+        ret = encodeWithExchangeBuffer(&encodedLength, &UA_TYPES[UA_TYPES_INT32], ctx);
+        UA_assert(ret != UA_STATUSCODE_BADENCODINGLIMITSEXCEEDED);
         UA_CHECK_STATUS(ret, return ret);
     }
 
@@ -983,8 +1002,17 @@ ENCODE_BINARY(Variant) {
     const UA_Boolean hasDimensions = isArray && src->arrayDimensionsSize > 0;
     if(isArray) {
         encoding |= (u8)UA_VARIANT_ENCODINGMASKTYPE_ARRAY;
-        if(hasDimensions)
+        if(hasDimensions) {
             encoding |= (u8)UA_VARIANT_ENCODINGMASKTYPE_DIMENSIONS;
+            size_t totalRequiredSize = 1;
+            for(size_t i = 0; i < src->arrayDimensionsSize; ++i) {
+                if(src->arrayDimensions[i] != 0 &&
+                   totalRequiredSize > SIZE_MAX / src->arrayDimensions[i])
+                    return UA_STATUSCODE_BADENCODINGERROR;
+                totalRequiredSize *= src->arrayDimensions[i];
+            }
+            if(totalRequiredSize != src->arrayLength) return UA_STATUSCODE_BADENCODINGERROR;
+        }
     }
 
     /* Encode the encoding byte */
@@ -1050,6 +1078,105 @@ Variant_decodeBinaryUnwrapExtensionObject(UA_Variant *dst, Ctx *ctx) {
     return decodeBinaryJumpTable[dst->type->typeKind](dst->data, dst->type, ctx);
 }
 
+/* Unwraps all ExtensionObjects in an array if they have the same type.
+ * For that we check whether all ExtensionObjects have the same header. */
+static status
+Variant_decodeBinaryUnwrapExtensionObjectArray(void *UA_RESTRICT *UA_RESTRICT dst,
+                                               size_t *out_length, const UA_DataType **type,
+                                               Ctx *ctx) {
+    u8 *orig_pos = ctx->pos;
+
+    /* Decode the length */
+    i32 signed_length;
+    status ret = DECODE_DIRECT(&signed_length, UInt32); /* Int32 */
+    UA_CHECK_STATUS(ret, return ret);
+
+    /* Return early for empty arrays */
+    if(signed_length <= 0) {
+        *out_length = 0;
+        if(signed_length < 0)
+            *dst = NULL;
+        else
+            *dst = UA_EMPTY_ARRAY_SENTINEL;
+        /* The *type field stays an ExtensionObject, as we did not decode any
+         * member who's type is known. */
+        return UA_STATUSCODE_GOOD;
+    }
+
+    /* Protect against memory exhaustion by unrealistic array lengths. An
+     * ExtensionObject is at least 4 byte long (3 byte NodeId + 1 Byte encoding
+     * field). */
+    size_t length = (size_t)signed_length;
+    UA_CHECK(ctx->pos + ((4 * length) / 32) <= ctx->end,
+             return UA_STATUSCODE_BADDECODINGERROR);
+
+    /* Decode the type NodeId of the first member */
+    UA_NodeId binTypeId;
+    UA_NodeId_init(&binTypeId);
+    ret |= DECODE_DIRECT(&binTypeId, NodeId);
+    UA_CHECK_STATUS(ret, return ret);
+
+    /* Lookup the data type */
+    const UA_DataType *contentType = UA_findDataTypeByBinaryInternal(&binTypeId, ctx);
+    UA_NodeId_clear(&binTypeId);
+    if(!contentType) {
+        /* DataType unknown, decode as ExtensionObject array */
+        ctx->pos = orig_pos;
+        return Array_decodeBinary(dst, out_length, *type, ctx);
+    }
+
+    /* Check that the encoding is binary */
+    u8 encoding = 0;
+    ret |= DECODE_DIRECT(&encoding, Byte);
+    UA_CHECK_STATUS(ret, return ret);
+    if(encoding != UA_EXTENSIONOBJECT_ENCODED_BYTESTRING) {
+        /* Encoding format is not automatically decoded, decode as
+         * ExtensionObject array */
+        ctx->pos = orig_pos;
+        return Array_decodeBinary(dst, out_length, *type, ctx);
+    }
+
+    /* Compare the header of all array members if the array can be unwrapped */
+    UA_ByteString header = {(uintptr_t)ctx->pos - (uintptr_t)orig_pos - 4, &orig_pos[4]};
+    UA_ByteString compare_header = header;
+    ctx->pos = &orig_pos[4];
+
+    for(size_t i = 0; i < length; i++) {
+        compare_header.data = ctx->pos;
+        UA_CHECK(compare_header.data + compare_header.length <= ctx->end,
+                 return UA_STATUSCODE_BADENCODINGLIMITSEXCEEDED);
+        if(!UA_ByteString_equal(&header, &compare_header)) {
+            /* Different member types, decode as ExtensionObject array */
+            ctx->pos = orig_pos;
+            return Array_decodeBinary(dst, out_length, *type, ctx);
+        }
+
+        /* Decode the length field and jump to the next element */
+        ctx->pos += header.length;
+        u32 member_length = 0;
+        ret = DECODE_DIRECT(&member_length, UInt32);
+        UA_CHECK_STATUS(ret, return ret);
+        ctx->pos += member_length;
+    }
+
+    /* Allocate memory for the unwrapped members */
+    *dst = UA_calloc(length, contentType->memSize);
+    UA_CHECK_MEM(*dst, return UA_STATUSCODE_BADOUTOFMEMORY);
+    *out_length = length;
+    *type = contentType;
+
+    /* Decode unwrapped members */
+    uintptr_t array_pos = (uintptr_t)*dst;
+    ctx->pos = &orig_pos[4];
+    for(size_t i = 0; i < length && ret == UA_STATUSCODE_GOOD; i++) {
+        ctx->pos += header.length + 4; /* Jump over the header and length field */
+        ret = decodeBinaryJumpTable[contentType->typeKind]
+            ((void*)array_pos, contentType, ctx);
+        array_pos += contentType->memSize;
+    }
+    return ret;
+}
+
 /* The resulting variant always has the storagetype UA_VARIANT_DATA. */
 DECODE_BINARY(Variant) {
     /* Decode the encoding byte */
@@ -1082,20 +1209,40 @@ DECODE_BINARY(Variant) {
 
     /* Decode the content */
     dst->type = &UA_TYPES[typeKind];
-    if(isArray) {
-        ret = Array_decodeBinary(&dst->data, &dst->arrayLength, dst->type, ctx);
-    } else if(typeKind != UA_DATATYPEKIND_EXTENSIONOBJECT) {
-        dst->data = UA_new(dst->type);
-        UA_CHECK_MEM(dst->data, ctx->depth--; return UA_STATUSCODE_BADOUTOFMEMORY);
-        ret = decodeBinaryJumpTable[typeKind](dst->data, dst->type, ctx);
+    if(!isArray) {
+        /* Decode scalar */
+        if(typeKind != UA_DATATYPEKIND_EXTENSIONOBJECT) {
+            dst->data = UA_new(dst->type);
+            UA_CHECK_MEM(dst->data, ctx->depth--; return UA_STATUSCODE_BADOUTOFMEMORY);
+            ret = decodeBinaryJumpTable[typeKind](dst->data, dst->type, ctx);
+        } else {
+            ret = Variant_decodeBinaryUnwrapExtensionObject(dst, ctx);
+        }
     } else {
-        ret = Variant_decodeBinaryUnwrapExtensionObject(dst, ctx);
-    }
+        /* Decode array */
+        if(typeKind != UA_DATATYPEKIND_EXTENSIONOBJECT) {
+            ret = Array_decodeBinary(&dst->data, &dst->arrayLength, dst->type, ctx);
+        } else {
+            ret = Variant_decodeBinaryUnwrapExtensionObjectArray(&dst->data, &dst->arrayLength,
+                                                                 &dst->type, ctx);
+        }
 
-    /* Decode array dimensions */
-    if(isArray && (encodingByte & (u8)UA_VARIANT_ENCODINGMASKTYPE_DIMENSIONS) > 0)
-        ret |= Array_decodeBinary((void**)&dst->arrayDimensions, &dst->arrayDimensionsSize,
-                                  &UA_TYPES[UA_TYPES_INT32], ctx);
+        /* Decode array dimensions */
+        if((encodingByte & (u8)UA_VARIANT_ENCODINGMASKTYPE_DIMENSIONS) > 0) {
+            ret |= Array_decodeBinary((void**)&dst->arrayDimensions, &dst->arrayDimensionsSize,
+                                      &UA_TYPES[UA_TYPES_INT32], ctx);
+            /* Validate array length against array dimensions */
+            size_t totalSize = 1;
+            for(size_t i = 0; i < dst->arrayDimensionsSize; ++i) {
+                if(dst->arrayDimensions[i] == 0)
+                    ret = UA_STATUSCODE_BADDECODINGERROR;
+                else if(totalSize > SIZE_MAX / dst->arrayDimensions[i])
+                    ret = UA_STATUSCODE_BADDECODINGERROR;
+                totalSize *= dst->arrayDimensions[i];
+            }
+            UA_CHECK(totalSize == dst->arrayLength, ret = UA_STATUSCODE_BADDECODINGERROR);
+        }
+    }
 
     ctx->depth--;
     return ret;
@@ -1192,17 +1339,17 @@ ENCODE_BINARY(DiagnosticInfo) {
     encodingMask |= (u8)(src->hasAdditionalInfo << 4u);
     encodingMask |= (u8)(src->hasInnerStatusCode << 5u);
     encodingMask |= (u8)(src->hasInnerDiagnosticInfo << 6u);
-    
+
     /* Encode the numeric content */
     status ret = ENCODE_DIRECT(&encodingMask, Byte);
     if(src->hasSymbolicId)
         ret |= ENCODE_DIRECT(&src->symbolicId, UInt32); /* Int32 */
     if(src->hasNamespaceUri)
         ret |= ENCODE_DIRECT(&src->namespaceUri, UInt32); /* Int32 */
-    if(src->hasLocalizedText)
-        ret |= ENCODE_DIRECT(&src->localizedText, UInt32); /* Int32 */
     if(src->hasLocale)
         ret |= ENCODE_DIRECT(&src->locale, UInt32); /* Int32 */
+    if(src->hasLocalizedText)
+        ret |= ENCODE_DIRECT(&src->localizedText, UInt32); /* Int32 */
     if(ret != UA_STATUSCODE_GOOD)
         return ret;
 
@@ -1245,13 +1392,13 @@ DECODE_BINARY(DiagnosticInfo) {
         dst->hasNamespaceUri = true;
         ret |= DECODE_DIRECT(&dst->namespaceUri, UInt32); /* Int32 */
     }
-    if(encodingMask & 0x04u) {
-        dst->hasLocalizedText = true;
-        ret |= DECODE_DIRECT(&dst->localizedText, UInt32); /* Int32 */
-    }
     if(encodingMask & 0x08u) {
         dst->hasLocale = true;
         ret |= DECODE_DIRECT(&dst->locale, UInt32); /* Int32 */
+    }
+    if(encodingMask & 0x04u) {
+        dst->hasLocalizedText = true;
+        ret |= DECODE_DIRECT(&dst->localizedText, UInt32); /* Int32 */
     }
     if(encodingMask & 0x10u) {
         dst->hasAdditionalInfo = true;
@@ -1476,6 +1623,9 @@ UA_encodeBinaryInternal(const void *src, const UA_DataType *type,
                         u8 **bufPos, const u8 **bufEnd,
                         UA_exchangeEncodeBuffer exchangeCallback,
                         void *exchangeHandle) {
+    if(!type || !src)
+        return UA_STATUSCODE_BADENCODINGERROR;
+
     /* Set up the context */
     Ctx ctx;
     ctx.pos = *bufPos;

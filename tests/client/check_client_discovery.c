@@ -14,7 +14,6 @@
 
 UA_Server *server;
 UA_Boolean running;
-UA_ServerNetworkLayer nl;
 THREAD_HANDLE server_thread;
 
 
@@ -44,16 +43,18 @@ START_TEST(Client_connect_badEndpointUrl) {
     UA_ClientConfig_setDefault(UA_Client_getConfig(client));
 
     /* Use the internal API to force a bad DiscoveryUrl */
-    UA_String_clear(&client->endpointUrl);
+    UA_String_clear(&client->config.endpointUrl);
     UA_String_clear(&client->discoveryUrl);
-    client->endpointUrl = UA_STRING_ALLOC("opc.tcp://localhost:4840");
+    client->config.endpointUrl = UA_STRING_ALLOC("opc.tcp://localhost:4840");
     client->discoveryUrl = UA_STRING_ALLOC("abc://xxx:4840");
 
     /* Open a Session when possible */
-    client->noSession = false;
+    client->config.noSession = false;
 
-    UA_StatusCode res = connectSync(client);
-    ck_assert_uint_eq(res, UA_STATUSCODE_GOOD);
+    lockClient(client);
+    connectSync(client);
+    unlockClient(client);
+    ck_assert_uint_eq(client->connectStatus, UA_STATUSCODE_GOOD);
 
     UA_Client_disconnect(client);
     UA_Client_delete(client);

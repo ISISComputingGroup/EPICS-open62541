@@ -5,37 +5,38 @@
  * Copyright (c) 2017 - 2018 Fraunhofer IOSB (Author: Andreas Ebner)
  */
 
-#include <open62541/plugin/pubsub_udp.h>
 #include <open62541/server_config_default.h>
 #include <open62541/server_pubsub.h>
 #include <open62541/types.h>
 
 #include "ua_pubsub.h"
-#include "ua_server_internal.h"
+#include "pubsub_test_helpers.h"
 
 #include <check.h>
+#include <stdlib.h>
 
 UA_Server *server = NULL;
 UA_NodeId connection1, writerGroup1, publishedDataSet1, dataSetWriter1;
 
 static void setup(void) {
     server = UA_Server_new();
+    ck_assert(server != NULL);
+    UA_StatusCode retVal = UA_STATUSCODE_GOOD;
     UA_ServerConfig *config = UA_Server_getConfig(server);
     UA_ServerConfig_setDefault(config);
-
-    UA_ServerConfig_addPubSubTransportLayer(config, UA_PubSubTransportLayerUDPMP());
-
     UA_Server_run_startup(server);
+
     UA_PubSubConnectionConfig connectionConfig;
     memset(&connectionConfig, 0, sizeof(UA_PubSubConnectionConfig));
     connectionConfig.name = UA_STRING("UADP Connection");
     UA_NetworkAddressUrlDataType networkAddressUrl =
-        {UA_STRING_NULL, UA_STRING("opc.udp://224.0.0.22:4840/")};
+        UA_PUBSUB_TEST_NETWORKADDRESSURL(UA_PUBSUB_TEST_UDP_MULTICAST_URL_4840);
     UA_Variant_setScalar(&connectionConfig.address, &networkAddressUrl,
                          &UA_TYPES[UA_TYPES_NETWORKADDRESSURLDATATYPE]);
     connectionConfig.transportProfileUri =
         UA_STRING("http://opcfoundation.org/UA-Profile/Transport/pubsub-udp-uadp");
-    UA_Server_addPubSubConnection(server, &connectionConfig, &connection1);
+    retVal |= UA_Server_addPubSubConnection(server, &connectionConfig, &connection1);
+    ck_assert_int_eq(retVal, UA_STATUSCODE_GOOD);
 }
 
 static void teardown(void) {
@@ -57,6 +58,17 @@ START_TEST(SinglePublishDataSetField){
     writerGroupConfig.name = UA_STRING("WriterGroup 1");
     writerGroupConfig.publishingInterval = 10;
     writerGroupConfig.encodingMimeType = UA_PUBSUB_ENCODING_JSON;
+
+    UA_DatagramWriterGroupTransport2DataType udpTransportSettings;
+    memset(&udpTransportSettings, 0, sizeof(UA_DatagramWriterGroupTransport2DataType));
+    UA_NetworkAddressUrlDataType writerGroupAddress =
+        UA_PUBSUB_TEST_NETWORKADDRESSURL(UA_PUBSUB_TEST_UDP_MULTICAST_URL_4840);
+    UA_ExtensionObject_setValue(&udpTransportSettings.address, &writerGroupAddress,
+                         &UA_TYPES[UA_TYPES_NETWORKADDRESSURLDATATYPE]);
+
+    UA_ExtensionObject_setValue(&writerGroupConfig.transportSettings, &udpTransportSettings,
+                         &UA_TYPES[UA_TYPES_DATAGRAMWRITERGROUPTRANSPORT2DATATYPE]);
+
     UA_StatusCode retVal =
         UA_Server_addWriterGroup(server, connection1, &writerGroupConfig, &writerGroup1);
     ck_assert_int_eq(retVal, UA_STATUSCODE_GOOD);
@@ -93,6 +105,11 @@ START_TEST(SinglePublishDataSetField){
     UA_WriterGroup *wg = UA_WriterGroup_findWGbyId(server, writerGroup1);
     ck_assert(wg != 0);
     UA_WriterGroup_publishCallback(server, wg);
+
+    UA_PubSubState state;
+    retVal = UA_Server_WriterGroup_getState(server, writerGroup1, &state);
+    ck_assert_int_eq(retVal, UA_STATUSCODE_GOOD);
+    ck_assert_int_eq(state, UA_PUBSUBSTATE_OPERATIONAL);
 } END_TEST
 
 int main(void) {

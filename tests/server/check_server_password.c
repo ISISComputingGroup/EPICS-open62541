@@ -19,6 +19,7 @@
 #include <unistd.h>
 #endif
 
+#include <stdlib.h>
 #include <check.h>
 
 #include "thread_wrapper.h"
@@ -30,9 +31,8 @@ THREAD_HANDLE server_thread;
 #if defined(__OpenBSD__)
 static UA_StatusCode
 loginCallback(const UA_String *userName, const UA_ByteString *password,
-    size_t loginSize, const UA_UsernamePasswordLogin *loginList,
-    void **sessionContext, void *loginContext)
-{
+              size_t loginSize, const UA_UsernamePasswordLogin *loginList,
+              void **sessionContext, void *loginContext) {
     char *pass;
     size_t i;
     int userok = 0, passok = 0;
@@ -144,6 +144,7 @@ static void setup(void) {
     ck_assert_msg(server, "UA_Server_new");
     UA_ServerConfig *config = UA_Server_getConfig(server);
     UA_ServerConfig_setDefault(config);
+    config->allowNonePolicyPassword = true;
     UA_String policy = UA_STRING_STATIC("http://opcfoundation.org/UA/SecurityPolicy#None");
     UA_UsernamePasswordLogin login[] = {
         { UA_STRING_STATIC("user"),
@@ -157,10 +158,10 @@ static void setup(void) {
         },
     };
 #if defined(__OpenBSD__) || defined(__linux__)
-    UA_AccessControl_defaultWithLoginCallback(config, false, NULL, &policy,
+    UA_AccessControl_defaultWithLoginCallback(config, false, &policy,
         sizeof(login) / sizeof(login[0]), login, loginCallback, "$6$");
 #else
-    UA_AccessControl_default(config, false, NULL, &policy,
+    UA_AccessControl_default(config, false, &policy,
         sizeof(login) / sizeof(login[0]), login);
 #endif
     UA_Server_run_startup(server);
@@ -231,7 +232,7 @@ START_TEST(Password_none) {
     UA_ClientConfig_setDefault(config);
 
     UA_StatusCode retval = UA_Client_connect(client, "opc.tcp://localhost:4840");
-    ck_assert_uint_eq(retval, UA_STATUSCODE_BADIDENTITYTOKENINVALID);
+    ck_assert_uint_eq(retval, UA_STATUSCODE_BADIDENTITYTOKENREJECTED);
     UA_Client_disconnect(client);
     UA_Client_delete(client);
 } END_TEST
